@@ -1,0 +1,279 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>駐車場 空き状況（評価用）</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 12px;
+      background: #cfcfcf;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    #guide-btn {
+      display: block;
+      margin: 0 auto 20px;
+      padding: 10px 16px;
+      font-size: 16px;
+      border-radius: 6px;
+      border: none;
+      background-color: #1976d2;
+      color: white;
+      cursor: pointer;
+    }
+    #guide-btn:hover {
+      background-color: #115293;
+    }
+
+    #parking-lot {
+      position: relative;
+      width: 900px;
+      height: 650px;
+      margin: auto;
+      background-color: #bfbfbf;
+    }
+
+    .path-top, .path-bottom {
+      position: absolute;
+      width: 900px;
+      background-color: #bfbfbf;
+      box-sizing: border-box;
+    }
+
+    .path-top {
+      height: 200px;
+      top: 0;
+      left: 0;
+      background-image: repeating-linear-gradient(to right, white 0 20px, transparent 20px 40px);
+      background-position: 0 50%;
+      background-size: 40px 4px;
+      background-repeat: repeat-x;
+    }
+
+    .path-bottom {
+      height: 0px;
+      bottom: 0;
+      left: 0;
+      background-image: repeating-linear-gradient(to right, white 0 20px, transparent 20px 40px);
+      background-position: 0 50%;
+      background-size: 40px 4px;
+      background-repeat: repeat-x;
+    }
+
+    .arrow {
+      position: absolute;
+      width: 60px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 140px;
+      font-weight: 1800;
+      color: white;
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+    }
+
+    .rod {
+      width: 300px;
+      height: 150px;
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: bold;
+      font-size: 28px;
+      box-sizing: border-box;
+      border-top: 4px solid white;
+      border-bottom: 4px solid white;
+      border-radius: 2px;
+    }
+
+    .status-empty   { background: #4caf50; }
+    .status-occupied { background: #f44336; }
+
+    #toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 9999;
+    }
+
+    .toast {
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 10px 16px;
+      margin-bottom: 12px;
+      border-radius: 6px;
+      font-size: 15px;
+      opacity: 0;
+      transform: translateY(-20px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .toast-green { background: rgba(76, 175, 80, 0.95) !important; }
+    .toast-red   { background: rgba(244, 67, 54, 0.95) !important; }
+
+  </style>
+</head>
+<body>
+
+  <h1>駐車場 空き状況（評価用）</h1>
+  <button id="guide-btn" onclick="guideToNearest()">一番近い空きロッドへ案内</button>
+
+  <div id="parking-lot"></div>
+  <div id="toast-container"></div>
+
+  <script>
+    /* ============================
+       通知
+    ============================ */
+    function showColoredToast(message, isEmpty) {
+      const box = document.getElementById("toast-container");
+      const toast = document.createElement("div");
+      toast.className = "toast " + (isEmpty ? "toast-green" : "toast-red");
+      toast.textContent = message;
+      box.appendChild(toast);
+      setTimeout(() => toast.classList.add("show"), 10);
+      setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    /* ============================
+       ダミーデータ（評価用）
+    ============================ */
+    const rods = {
+      "A1": {status:0,label:"A1",time:"12:00:00"},
+      "A2": {status:1,label:"A2",time:"12:00:00"},
+      "A3": {status:0,label:"A3",time:"12:00:00"},
+      "B1": {status:1,label:"B1",time:"12:00:00"},
+      "B2": {status:0,label:"B2",time:"12:00:00"},
+      "B3": {status:1,label:"B3",time:"12:00:00"}
+    };
+
+    const rodLocations = {
+      "A1": { lat: 35.68120, lon: 139.76710 },
+      "A2": { lat: 35.68122, lon: 139.76720 },
+      "A3": { lat: 35.68124, lon: 139.76730 },
+      "B1": { lat: 35.68126, lon: 139.76740 },
+      "B2": { lat: 35.68128, lon: 139.76750 },
+      "B3": { lat: 35.68130, lon: 139.76760 }
+    };
+
+    /* ============================
+       UI レンダリング
+    ============================ */
+    function render(rods) {
+      const lot = document.getElementById("parking-lot");
+      lot.innerHTML = "";
+
+      lot.appendChild(Object.assign(document.createElement("div"), {className:"path-top"}));
+      lot.appendChild(Object.assign(document.createElement("div"), {className:"path-bottom"}));
+
+      const arrows = [{x: 450, y: 300, symbol: "↓"}];
+      arrows.forEach(a => {
+        const div = document.createElement("div");
+        div.className = "arrow";
+        div.style.left = a.x + "px";
+        div.style.top = a.y + "px";
+        div.innerText = a.symbol;
+        lot.appendChild(div);
+      });
+
+      const positions = {
+        "A1": {row:1, col:1}, "A2": {row:2, col:1}, "A3": {row:3, col:1},
+        "B1": {row:1, col:3}, "B2": {row:2, col:3}, "B3": {row:3, col:3}
+      };
+      const cellWidth = 300;
+      const cellHeight = 150;
+      const topOffset = 195;
+
+      for (const id in rods) {
+        const r = rods[id];
+        const pos = positions[r.label];
+        if (!pos) continue;
+        const div = document.createElement("div");
+        div.className = "rod " + (r.status===0 ? "status-empty" : "status-occupied");
+        div.innerHTML = `${r.label}<br>${r.status===0 ? "空き" : "使用中"}<br><span style="font-size:12px; color:#eee;">更新: ${r.time}</span>`;
+        div.style.left = `${(pos.col-1)*cellWidth}px`;
+        div.style.top  = `${(pos.row-1)*cellHeight + topOffset}px`;
+        lot.appendChild(div);
+      }
+    }
+
+    render(rods);
+
+    /* ============================
+       GPS機能：最寄り空きロッド案内
+    ============================ */
+    function getCurrentLocation() {
+      return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          pos => resolve({lat: pos.coords.latitude, lon: pos.coords.longitude}),
+          err => reject(err),
+          { enableHighAccuracy: true }
+        );
+      });
+    }
+
+    function distance(lat1, lon1, lat2, lon2) {
+      const R = 6371e3;
+      const toRad = x => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    async function findNearestEmptyRod(rods) {
+      const user = await getCurrentLocation();
+      let nearest = null;
+      let minDist = Infinity;
+      for (const id in rods) {
+        const r = rods[id];
+        if (r.status !== 0) continue;
+        const loc = rodLocations[r.label];
+        if (!loc) continue;
+        const d = distance(user.lat, user.lon, loc.lat, loc.lon);
+        if (d < minDist) {
+          minDist = d;
+          nearest = { label: r.label, dist: d, loc };
+        }
+      }
+      return nearest;
+    }
+
+    async function guideToNearest() {
+      try {
+        const nearest = await findNearestEmptyRod(rods);
+        if (!nearest) {
+          alert("空きロッドがありません");
+          return;
+        }
+        alert(`最寄りの空きロッド: ${nearest.label}（約${Math.round(nearest.dist)}m）`);
+        window.open(
+          `https://www.google.com/maps/dir/?api=1&destination=${nearest.loc.lat},${nearest.loc.lon}`
+        );
+      } catch (e) {
+        alert("位置情報の取得に失敗しました。HTTPSで開いているか確認してください。");
+      }
+    }
+
+  </script>
+</body>
+</html>
