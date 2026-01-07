@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>駐車場 空き状況ナビ（完全版）</title>
+<title>駐車場 空き状況ナビ（矢印付き）</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 
 <style>
@@ -69,6 +69,16 @@ h1 { margin-bottom: 10px; }
   display: none;
 }
 
+/* 矢印 */
+#arrow {
+  position: absolute;
+  width: 2px;
+  background: red;
+  transform-origin: top left;
+  z-index: 900;
+  display: none;
+}
+
 .distance {
   font-size: 14px;
   font-weight: normal;
@@ -78,22 +88,23 @@ h1 { margin-bottom: 10px; }
 
 <body>
 
-<h1>駐車場 空き状況</h1>
+<h1>駐車場 空き状況ナビ（矢印付き）</h1>
 
 <div id="location">位置情報を取得中...</div>
 
 <div id="parking-lot">
   <div id="user-marker"></div>
+  <div id="arrow"></div>
 </div>
 
 <script>
 /* =============================
    駐車場 GPS 範囲（重要）
 ============================= */
-const MIN_LAT = 38.167700;
-const MAX_LAT = 38.167799;
-const MIN_LNG = 140.866300;
-const MAX_LNG = 140.866400;
+const MIN_LAT = 38.1595;
+const MAX_LAT = 38.1605;
+const MIN_LNG = 140.8600;
+const MAX_LNG = 140.8618;
 
 /* =============================
    ダミー駐車ロッド
@@ -130,7 +141,6 @@ function gpsToUI(lat,lng){
   const lot=document.getElementById("parking-lot");
   const w=lot.clientWidth;
   const h=lot.clientHeight;
-
   return {
     x:(lng-MIN_LNG)/(MAX_LNG-MIN_LNG)*w,
     y:(MAX_LAT-lat)/(MAX_LAT-MIN_LAT)*h
@@ -143,6 +153,7 @@ function gpsToUI(lat,lng){
 function render(){
   const lot=document.getElementById("parking-lot");
   const marker=document.getElementById("user-marker");
+  const arrow=document.getElementById("arrow");
 
   // ユーザーマーカー
   if(userLat!==null){
@@ -155,6 +166,7 @@ function render(){
   // 最寄り空き
   let nearest=null;
   let minDist=Infinity;
+  let nearestPos=null;
 
   if(userLat!==null){
     rods.forEach(r=>{
@@ -163,6 +175,7 @@ function render(){
         if(r.dist<minDist){
           minDist=r.dist;
           nearest=r.id;
+          nearestPos=gpsToUI(r.lat,r.lng);
         }
       }
     });
@@ -187,6 +200,20 @@ function render(){
     d.style.top =(r.row-1)*cellH+topOffset+"px";
     lot.appendChild(d);
   });
+
+  // 矢印描画
+  if(nearestPos && userLat!==null){
+    const dx=nearestPos.x-p.x;
+    const dy=nearestPos.y-p.y;
+    const len=Math.sqrt(dx*dx+dy*dy);
+    const angle=Math.atan2(dy,dx)*180/Math.PI;
+
+    arrow.style.width=len+"px";
+    arrow.style.transform=`rotate(${angle}deg)`;
+    arrow.style.left=p.x+"px";
+    arrow.style.top=p.y+"px";
+    arrow.style.display="block";
+  }
 }
 
 /* =============================
