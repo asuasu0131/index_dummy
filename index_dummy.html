@@ -103,6 +103,7 @@ h1 {
 
 <h1>駐車場 空き状況ナビ</h1>
 <div id="location">位置情報を取得中...</div>
+<button onclick="requestOrientationPermission()">方位センサを有効化</button>
 
 <div id="parking-lot">
   <div id="user-marker"></div>
@@ -131,8 +132,11 @@ const rods = [
 ];
 
 let userLat=null, userLng=null;
+let deviceHeading=null; // スマホ向き（方位角）
 
-/* 距離計算 */
+/* =============================
+   GPS距離計算
+============================= */
 function calcDistance(lat1,lng1,lat2,lng2){
   const R=6371e3;
   const φ1=lat1*Math.PI/180;
@@ -143,7 +147,9 @@ function calcDistance(lat1,lng1,lat2,lng2){
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-/* GPS → UI */
+/* =============================
+   GPS → UI座標
+============================= */
 function gpsToUI(lat,lng){
   const lot=document.getElementById("parking-lot");
   return {
@@ -152,7 +158,22 @@ function gpsToUI(lat,lng){
   };
 }
 
-/* 描画 */
+/* =============================
+   2地点の方位角計算
+============================= */
+function bearing(lat1,lng1,lat2,lng2){
+  const φ1=lat1*Math.PI/180;
+  const φ2=lat2*Math.PI/180;
+  const λ1=lng1*Math.PI/180;
+  const λ2=lng2*Math.PI/180;
+  const y=Math.sin(λ2-λ1)*Math.cos(φ2);
+  const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(λ2-λ1);
+  return (Math.atan2(y,x)*180/Math.PI+360)%360;
+}
+
+/* =============================
+   描画
+============================= */
 function render(){
   const lot=document.getElementById("parking-lot");
   const marker=document.getElementById("user-marker");
@@ -189,18 +210,33 @@ function render(){
     lot.appendChild(d);
   });
 
+  /* 矢印描画（スマホ向き対応） */
   if(nearestPos && userPos){
+    const targetBearing = bearing(userLat,userLng,
+                                  rods.find(r=>r.id===nearest).lat,
+                                  rods.find(r=>r.id===nearest).lng);
+    let angleDeg = 0;
+    if(deviceHeading!==null){
+      angleDeg = targetBearing - deviceHeading;
+    } else {
+      // センサ未対応なら従来通り
+      const dx=nearestPos.x-userPos.x;
+      const dy=nearestPos.y-userPos.y;
+      angleDeg = Math.atan2(dy,dx)*180/Math.PI;
+    }
     const dx=nearestPos.x-userPos.x;
     const dy=nearestPos.y-userPos.y;
     arrow.style.width=Math.hypot(dx,dy)+"px";
     arrow.style.left=userPos.x+"px";
     arrow.style.top=userPos.y+"px";
-    arrow.style.transform=`rotate(${Math.atan2(dy,dx)}rad)`;
+    arrow.style.transform=`rotate(${angleDeg}deg)`;
     arrow.style.display="block";
   }
 }
 
-/* GPS */
+/* =============================
+   GPS取得
+============================= */
 navigator.geolocation.watchPosition(
   p=>{
     userLat=p.coords.latitude;
@@ -212,6 +248,29 @@ navigator.geolocation.watchPosition(
   ()=>document.getElementById("location").textContent="位置情報取得不可",
   {enableHighAccuracy:true}
 );
+
+/* =============================
+   スマホ方位センサ
+============================= */
+function requestOrientationPermission(){
+  if(typeof DeviceOrientationEvent !== "undefined" &&
+     typeof DeviceOrientationEvent.requestPermission === "function"){
+    DeviceOrientationEvent.requestPermission().then(state=>{
+      if(state==="granted"){
+        window.addEventListener("deviceorientation", handleOrientation, true);
+      }
+    });
+  }else{
+    window.addEventListener("deviceorientation", handleOrientation, true);
+  }
+}
+
+function handleOrientation(e){
+  if(e.alpha!==null){
+    deviceHeading = e.alpha; // 0〜360°
+    render();
+  }
+}
 </script>
 
 </body>
