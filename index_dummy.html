@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>駐車場 空き状況ナビ（矢印付き）</title>
+<title>スマパ 駐車場 空き状況ナビ（矢印付き）</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 
 <style>
@@ -96,18 +96,58 @@ h1 {
   body { padding: 4px; }
   .rod { border-width: 2px; }
 }
+
+/* ===== 方位センサモーダル ===== */
+#orientation-modal {
+  position: fixed;
+  top:0; left:0;
+  width:100%; height:100%;
+  background: rgba(0,0,0,0.85);
+  color: white;
+  display:flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 3000;
+  text-align: center;
+  padding: 20px;
+}
+#orientation-modal h2 {
+  font-size: clamp(18px,5vw,28px);
+  margin-bottom: 16px;
+}
+#orientation-modal p {
+  font-size: clamp(14px,4vw,18px);
+  margin-bottom: 24px;
+}
+#orientation-modal button {
+  padding: 12px 24px;
+  font-size: clamp(14px,4vw,18px);
+  border:none;
+  border-radius:20px;
+  background: linear-gradient(45deg,#26c6da,#00acc1);
+  color:white;
+  font-weight:600;
+  cursor:pointer;
+}
 </style>
 </head>
 
 <body>
 
-<h1>駐車場 空き状況ナビ</h1>
+<h1>スマパ 駐車場 空き状況ナビ</h1>
 <div id="location">位置情報を取得中...</div>
-<button onclick="requestOrientationPermission()">方位センサを有効化</button>
 
 <div id="parking-lot">
   <div id="user-marker"></div>
   <div id="arrow"></div>
+</div>
+
+<!-- 方位センサモーダル -->
+<div id="orientation-modal">
+  <h2>スマパナビを利用するには</h2>
+  <p>方位センサを有効化してください</p>
+  <button id="enable-orientation-btn">有効化</button>
 </div>
 
 <script>
@@ -219,7 +259,6 @@ function render(){
     if(deviceHeading!==null){
       angleDeg = targetBearing - deviceHeading;
     } else {
-      // センサ未対応なら従来通り
       const dx=nearestPos.x-userPos.x;
       const dy=nearestPos.y-userPos.y;
       angleDeg = Math.atan2(dy,dx)*180/Math.PI;
@@ -252,25 +291,32 @@ navigator.geolocation.watchPosition(
 /* =============================
    スマホ方位センサ
 ============================= */
-function requestOrientationPermission(){
-  if(typeof DeviceOrientationEvent !== "undefined" &&
-     typeof DeviceOrientationEvent.requestPermission === "function"){
-    DeviceOrientationEvent.requestPermission().then(state=>{
-      if(state==="granted"){
-        window.addEventListener("deviceorientation", handleOrientation, true);
-      }
-    });
-  }else{
-    window.addEventListener("deviceorientation", handleOrientation, true);
-  }
-}
-
 function handleOrientation(e){
   if(e.alpha!==null){
     deviceHeading = e.alpha; // 0〜360°
     render();
   }
 }
+
+document.getElementById("enable-orientation-btn").addEventListener("click", async ()=>{
+  if(typeof DeviceOrientationEvent !== "undefined" &&
+     typeof DeviceOrientationEvent.requestPermission === "function"){
+    try{
+      const state = await DeviceOrientationEvent.requestPermission();
+      if(state==="granted"){
+        window.addEventListener("deviceorientation", handleOrientation, true);
+        document.getElementById("orientation-modal").style.display="none";
+      } else {
+        alert("方位センサが許可されませんでした。ナビは方向表示できません。");
+      }
+    }catch(e){
+      alert("方位センサの取得に失敗しました。");
+    }
+  } else {
+    window.addEventListener("deviceorientation", handleOrientation, true);
+    document.getElementById("orientation-modal").style.display="none";
+  }
+});
 </script>
 
 </body>
