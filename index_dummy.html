@@ -9,87 +9,99 @@
 body {
   font-family: sans-serif;
   background: #cfcfcf;
-  padding: 12px;
+  padding: 8px;
+  margin: 0;
   text-align: center;
 }
 
-h1 { margin-bottom: 10px; }
+h1 {
+  font-size: clamp(18px, 4vw, 26px);
+  margin: 6px 0;
+}
 
 #location {
   background: #fff;
-  padding: 10px;
-  margin-bottom: 10px;
+  padding: 8px;
+  margin-bottom: 8px;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: clamp(12px, 3vw, 14px);
 }
 
+/* ===== 駐車場エリア（レスポンシブ） ===== */
 #parking-lot {
   position: relative;
-  width: 900px;
-  height: 650px;
+  width: 100%;
+  max-width: 900px;
+  aspect-ratio: 9 / 6.5;
   margin: auto;
   background: #bfbfbf;
   overflow: hidden;
+  border-radius: 10px;
 }
 
-/* 駐車ロッド */
+/* ===== 駐車ロッド ===== */
 .rod {
-  width: 300px;
-  height: 150px;
   position: absolute;
+  width: 33.33%;
+  height: 22%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   color: white;
   font-weight: bold;
-  font-size: 26px;
-  border-top: 4px solid white;
-  border-bottom: 4px solid white;
+  font-size: clamp(14px, 3.5vw, 24px);
+  border-top: 3px solid white;
+  border-bottom: 3px solid white;
+  box-sizing: border-box;
 }
 
 .empty { background: #4caf50; }
 .full  { background: #f44336; }
 
-/* 最寄り強調 */
 .nearest {
-  outline: 6px solid yellow;
-  box-shadow: 0 0 20px rgba(255,255,0,0.9);
+  outline: 4px solid yellow;
+  box-shadow: 0 0 14px rgba(255,255,0,0.9);
 }
 
-/* 自分の位置 */
+/* ===== 自分の位置 ===== */
 #user-marker {
   position: absolute;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   background: #2196f3;
   border-radius: 50%;
-  border: 3px solid white;
+  border: 2px solid white;
   z-index: 1000;
   display: none;
 }
 
-/* 矢印 */
+/* ===== 矢印 ===== */
 #arrow {
   position: absolute;
-  width: 2px;
+  height: 2px;
   background: red;
-  transform-origin: top left;
+  transform-origin: left center;
   z-index: 900;
   display: none;
 }
 
 .distance {
-  font-size: 14px;
+  font-size: clamp(10px, 2.5vw, 14px);
   font-weight: normal;
+}
+
+/* ===== スマホ最適化 ===== */
+@media (max-width: 600px) {
+  body { padding: 4px; }
+  .rod { border-width: 2px; }
 }
 </style>
 </head>
 
 <body>
 
-<h1>駐車場 空き状況ナビ（矢印付き）</h1>
-
+<h1>駐車場 空き状況ナビ</h1>
 <div id="location">位置情報を取得中...</div>
 
 <div id="parking-lot">
@@ -99,12 +111,12 @@ h1 { margin-bottom: 10px; }
 
 <script>
 /* =============================
-   駐車場 GPS 範囲（重要）
+   駐車場 GPS 範囲
 ============================= */
-const MIN_LAT = 38.167750;
-const MAX_LAT = 38.167800;
-const MIN_LNG = 140.866320;
-const MAX_LNG = 140.866350;
+const MIN_LAT = 38.167755;
+const MAX_LAT = 38.167785;
+const MIN_LNG = 140.866325;
+const MAX_LNG = 140.866355;
 
 /* =============================
    ダミー駐車ロッド
@@ -118,12 +130,9 @@ const rods = [
   { id:"B3", label:"B3", lat:38.167782, lng:140.866350, status:0, row:3, col:3 }
 ];
 
-let userLat = null;
-let userLng = null;
+let userLat=null, userLng=null;
 
-/* =============================
-   距離計算
-============================= */
+/* 距離計算 */
 function calcDistance(lat1,lng1,lat2,lng2){
   const R=6371e3;
   const φ1=lat1*Math.PI/180;
@@ -134,109 +143,75 @@ function calcDistance(lat1,lng1,lat2,lng2){
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-/* =============================
-   緯度経度 → UI座標
-============================= */
+/* GPS → UI */
 function gpsToUI(lat,lng){
   const lot=document.getElementById("parking-lot");
-  const w=lot.clientWidth;
-  const h=lot.clientHeight;
   return {
-    x:(lng-MIN_LNG)/(MAX_LNG-MIN_LNG)*w,
-    y:(MAX_LAT-lat)/(MAX_LAT-MIN_LAT)*h
+    x:(lng-MIN_LNG)/(MAX_LNG-MIN_LNG)*lot.clientWidth,
+    y:(MAX_LAT-lat)/(MAX_LAT-MIN_LAT)*lot.clientHeight
   };
 }
 
-/* =============================
-   描画
-============================= */
+/* 描画 */
 function render(){
   const lot=document.getElementById("parking-lot");
   const marker=document.getElementById("user-marker");
   const arrow=document.getElementById("arrow");
 
-  // ユーザーマーカー
-  if(userLat!==null){
-    const p=gpsToUI(userLat,userLng);
-    marker.style.left=(p.x-9)+"px";
-    marker.style.top=(p.y-9)+"px";
+  document.querySelectorAll(".rod").forEach(e=>e.remove());
+
+  let nearest=null, minDist=Infinity, nearestPos=null, userPos=null;
+
+  if(userLat){
+    userPos=gpsToUI(userLat,userLng);
+    marker.style.left=(userPos.x-7)+"px";
+    marker.style.top=(userPos.y-7)+"px";
     marker.style.display="block";
   }
 
-  // 最寄り空き
-  let nearest=null;
-  let minDist=Infinity;
-  let nearestPos=null;
-
-  if(userLat!==null){
-    rods.forEach(r=>{
-      if(r.status===0){
-        r.dist=calcDistance(userLat,userLng,r.lat,r.lng);
-        if(r.dist<minDist){
-          minDist=r.dist;
-          nearest=r.id;
-          nearestPos=gpsToUI(r.lat,r.lng);
-        }
-      }
-    });
-  }
-
-  // ロッド描画
-  const cellW=300, cellH=150, topOffset=200;
-  document.querySelectorAll(".rod").forEach(e=>e.remove());
-
   rods.forEach(r=>{
+    if(userLat && r.status===0){
+      r.dist=calcDistance(userLat,userLng,r.lat,r.lng);
+      if(r.dist<minDist){
+        minDist=r.dist;
+        nearest=r.id;
+        nearestPos=gpsToUI(r.lat,r.lng);
+      }
+    }
+
     const d=document.createElement("div");
     d.className="rod "+(r.status===0?"empty":"full");
     if(r.id===nearest) d.classList.add("nearest");
 
-    d.innerHTML=`
-      ${r.label}<br>
-      ${r.status===0?"空き":"使用中"}
-      ${r.dist?`<div class="distance">${r.dist.toFixed(1)} m</div>`:""}
-    `;
-
-    d.style.left=(r.col-1)*cellW+"px";
-    d.style.top =(r.row-1)*cellH+topOffset+"px";
+    d.innerHTML=`${r.label}<br>${r.status===0?"空き":"使用中"}${r.dist?`<div class="distance">${r.dist.toFixed(1)}m</div>`:""}`;
+    d.style.left=((r.col-1)/3*100)+"%";
+    d.style.top=((r.row-1)*22+30)+"%";
     lot.appendChild(d);
   });
 
-  // 矢印描画
-  if(nearestPos && userLat!==null){
-    const dx=nearestPos.x-p.x;
-    const dy=nearestPos.y-p.y;
-    const len=Math.sqrt(dx*dx+dy*dy);
-    const angle=Math.atan2(dy,dx)*180/Math.PI;
-
-    arrow.style.width=len+"px";
-    arrow.style.transform=`rotate(${angle}deg)`;
-    arrow.style.left=p.x+"px";
-    arrow.style.top=p.y+"px";
+  if(nearestPos && userPos){
+    const dx=nearestPos.x-userPos.x;
+    const dy=nearestPos.y-userPos.y;
+    arrow.style.width=Math.hypot(dx,dy)+"px";
+    arrow.style.left=userPos.x+"px";
+    arrow.style.top=userPos.y+"px";
+    arrow.style.transform=`rotate(${Math.atan2(dy,dx)}rad)`;
     arrow.style.display="block";
   }
 }
 
-/* =============================
-   GPS取得
-============================= */
+/* GPS */
 navigator.geolocation.watchPosition(
-  pos=>{
-    userLat=pos.coords.latitude;
-    userLng=pos.coords.longitude;
-
+  p=>{
+    userLat=p.coords.latitude;
+    userLng=p.coords.longitude;
     document.getElementById("location").textContent=
-      `現在地：緯度 ${userLat.toFixed(6)} / 経度 ${userLng.toFixed(6)}`;
-
+      `現在地：${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
     render();
   },
-  err=>{
-    document.getElementById("location").textContent=
-      "位置情報を取得できません";
-  },
+  ()=>document.getElementById("location").textContent="位置情報取得不可",
   {enableHighAccuracy:true}
 );
-
-render();
 </script>
 
 </body>
