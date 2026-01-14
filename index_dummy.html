@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>駐車場 空き状況ナビ2</title>
+<title>駐車場 空き状況ナビ（滑らかGPS対応）</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 
 <style>
@@ -190,35 +190,6 @@ function sendMyPosition(){
   }
 }
 
-// ===== GPS取得 =====
-navigator.geolocation.watchPosition(p=>{
-  userLat = p.coords.latitude;
-  userLng = p.coords.longitude;
-  document.getElementById("location").textContent =
-    `現在地：${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
-  sendMyPosition();
-},{enableHighAccuracy:true, maximumAge:100, timeout:5000});
-
-// ===== GPS滑らか表示 =====
-function updateUserMarker(){
-  const marker = document.getElementById("user-marker");
-  if(userLat === null || userLng === null) return;
-
-  const target = gpsToUI(userLat, userLng);
-  if(!displayedPos) displayedPos = {x: target.x, y: target.y};
-
-  // 線形補間で滑らかに
-  displayedPos.x += (target.x - displayedPos.x) * 0.2;
-  displayedPos.y += (target.y - displayedPos.y) * 0.2;
-
-  marker.style.left = (displayedPos.x - 7) + "px";
-  marker.style.top  = (displayedPos.y - 7) + "px";
-  marker.style.display = "block";
-
-  requestAnimationFrame(updateUserMarker);
-}
-updateUserMarker();
-
 // ===== 描画 =====
 function render(){
   const lot = document.getElementById("parking-lot");
@@ -226,15 +197,26 @@ function render(){
 
   document.querySelectorAll(".rod, .user-marker-other").forEach(e=>e.remove());
 
+  // ===== ロッド描画（GPSに依存せず常に表示） =====
+  rods.forEach(r=>{
+    const d = document.createElement("div");
+    d.className = "rod " + (r.status===0 ? "empty" : "full");
+    d.innerHTML = `${r.label}<br>${r.status===0?"空き":"使用中"}`;
+    d.style.left = ((r.col-1)/3*100) + "%";
+    d.style.top  = ((r.row-1)*22+30) + "%";
+    lot.appendChild(d);
+  });
+
+  if(!displayedPos) return; // GPS未取得なら矢印や距離は描画しない
+
   let nearest=null;
   let minDist=Infinity;
   let nearestPos=null;
   let userPos = displayedPos;
 
-  // 最寄りロッド判定
-  rods.forEach(r=> r.dist=null);
+  // ===== 最寄りロッド判定 =====
   rods.forEach(r=>{
-    if(userPos && r.status===0){
+    if(r.status===0){
       r.dist = calcDistance(userLat,userLng,r.lat,r.lng);
       if(r.dist < minDist){
         minDist = r.dist;
@@ -244,19 +226,16 @@ function render(){
     }
   });
 
-  // ロッド描画
-  rods.forEach(r=>{
-    const d = document.createElement("div");
-    d.className = "rod " + (r.status===0 ? "empty" : "full");
-    if(r.id === nearest) d.classList.add("nearest");
-    d.innerHTML = `${r.label}<br>${r.status===0?"空き":"使用中"}${r.dist ? `<div class="distance">${r.dist.toFixed(1)}m</div>` : ""}`;
-    d.style.left = ((r.col-1)/3*100) + "%";
-    d.style.top  = ((r.row-1)*22+30) + "%";
-    lot.appendChild(d);
-  });
+  // ===== 最寄りロッド装飾 =====
+  if(nearestPos){
+    const nearestDiv = Array.from(document.querySelectorAll(".rod"))
+                            .find(d => d.innerHTML.includes(nearest));
+    if(nearestDiv) nearestDiv.classList.add("nearest");
+    if(nearestDiv) nearestDiv.innerHTML += `<div class="distance">${minDist.toFixed(1)}m</div>`;
+  }
 
-  // 矢印描画
-  if(nearestPos && userPos){
+  // ===== 矢印描画 =====
+  if(nearestPos){
     const targetBearing = bearing(userLat,userLng,
                                   rods.find(r=>r.id===nearest).lat,
                                   rods.find(r=>r.id===nearest).lng);
@@ -271,7 +250,7 @@ function render(){
     arrow.style.display = "block";
   }
 
-  // 他ユーザー描画
+  // ===== 他ユーザー描画 =====
   Object.entries(users).forEach(([id, info])=>{
     if(id === myId) return;
     const pos = gpsToUI(info.lat, info.lng);
@@ -282,6 +261,35 @@ function render(){
     lot.appendChild(other);
   });
 }
+
+// ===== GPS取得 & 滑らか表示 =====
+navigator.geolocation.watchPosition(p=>{
+  userLat = p.coords.latitude;
+  userLng = p.coords.longitude;
+  document.getElementById("location").textContent =
+    `現在地：${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
+  sendMyPosition();
+}, ()=>document.getElementById("location").textContent="位置情報取得不可",
+{enableHighAccuracy:true, maximumAge:100, timeout:5000});
+
+function updateUserMarker(){
+  const marker = document.getElementById("user-marker");
+  if(userLat === null || userLng === null) return;
+
+  const target = gpsToUI(userLat, userLng);
+  if(!displayedPos) displayedPos = {x: target.x, y: target.y};
+
+  displayedPos.x += (target.x - displayedPos.x) * 0.2;
+  displayedPos.y += (target.y - displayedPos.y) * 0.2;
+
+  marker.style.left = (displayedPos.x - 7) + "px";
+  marker.style.top  = (displayedPos.y - 7) + "px";
+  marker.style.display = "block";
+
+  render(); // 滑らか更新に合わせて描画
+  requestAnimationFrame(updateUserMarker);
+}
+updateUserMarker();
 
 // ===== 方位センサ =====
 document.getElementById("enable-orientation").addEventListener("click", ()=>{
