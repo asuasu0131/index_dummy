@@ -73,6 +73,16 @@ h1 {
   display: none;
 }
 
+.user-marker-other {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #ff9800;
+  border: 2px solid white;
+  border-radius: 50%;
+  z-index: 999;
+}
+
 #arrow {
   position: absolute;
   height: 2px;
@@ -109,18 +119,12 @@ h1 {
 <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
 
 <script>
-/* =============================
-   駐車場 GPS 範囲
-============================= */
 const MIN_LAT = 38.167740;
 const MAX_LAT = 38.167785;
 const MIN_LNG = 140.86625;
 const MAX_LNG = 140.86655;
 
-/* =============================
-   ダミー駐車ロッド
-============================= */
-const rods = [
+let rods = [
   { id:"A1", label:"A1", lat:38.167760, lng:140.866330, status:0, row:1, col:1 },
   { id:"A2", label:"A2", lat:38.167764, lng:140.866334, status:1, row:2, col:1 },
   { id:"A3", label:"A3", lat:38.167770, lng:140.866338, status:0, row:3, col:1 },
@@ -130,13 +134,20 @@ const rods = [
 ];
 
 let userLat = null, userLng = null;
-let deviceHeading = null; // 北基準角度
+let deviceHeading = null;
 const myId = crypto.randomUUID();
-let users = {}; // 他のユーザー情報
+let users = {};
 
-/* =============================
-   GPS距離計算
-============================= */
+// ===== GPS → UI 座標変換 =====
+function gpsToUI(lat,lng){
+  const lot=document.getElementById("parking-lot");
+  return {
+    x:(lng-MIN_LNG)/(MAX_LNG-MIN_LNG)*lot.clientWidth,
+    y:(MAX_LAT-lat)/(MAX_LAT-MIN_LAT)*lot.clientHeight
+  };
+}
+
+// ===== 距離計算 =====
 function calcDistance(lat1,lng1,lat2,lng2){
   const R=6371e3;
   const φ1=lat1*Math.PI/180;
@@ -147,20 +158,7 @@ function calcDistance(lat1,lng1,lat2,lng2){
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-/* =============================
-   GPS → UI座標
-============================= */
-function gpsToUI(lat,lng){
-  const lot=document.getElementById("parking-lot");
-  return {
-    x:(lng-MIN_LNG)/(MAX_LNG-MIN_LNG)*lot.clientWidth,
-    y:(MAX_LAT-lat)/(MAX_LAT-MIN_LAT)*lot.clientHeight
-  };
-}
-
-/* =============================
-   2地点の方位角計算（北=0°）
-============================= */
+// ===== 方位角計算 =====
 function bearing(lat1,lng1,lat2,lng2){
   const φ1=lat1*Math.PI/180;
   const φ2=lat2*Math.PI/180;
@@ -171,20 +169,28 @@ function bearing(lat1,lng1,lat2,lng2){
   return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
 
-/* =============================
-   Socket.IO 接続
-============================= */
-const socket = io("https://parking-monitor-fr8a.onrender.com"); // ←RenderのURL
-socket.emit("join", {id: myId});
+// ===== Socket.IO 接続 =====
+const socket = io("https://parking-monitor-fr8a.onrender.com"); // Render URL
 
-socket.on("users", data => {
+socket.on("rods_status", data=>{
+  rods.forEach(r=>{
+    if(data[r.id] !== undefined) r.status = data[r.id];
+  });
+  render();
+});
+
+socket.on("users", data=>{
   users = data;
   render();
 });
 
-/* =============================
-   描画
-============================= */
+function sendMyPosition(){
+  if(userLat !== null && userLng !== null){
+    socket.emit("update", {id: myId, lat: userLat, lng: userLng});
+  }
+}
+
+// ===== 描画 =====
 function render(){
   const lot = document.getElementById("parking-lot");
   const marker = document.getElementById("user-marker");
@@ -192,110 +198,102 @@ function render(){
 
   document.querySelectorAll(".rod, .user-marker-other").forEach(e=>e.remove());
 
-  let nearest=null, minDist=Infinity, nearestPos=null, userPos=null;
+  let nearest=null;
+  let minDist=Infinity;
+  let nearestPos=null;
+  let userPos=null;
 
   if(userLat){
     userPos = gpsToUI(userLat,userLng);
-    marker.style.left=(userPos.x-7)+"px";
-    marker.style.top=(userPos.y-7)+"px";
-    marker.style.display="block";
+    marker.style.left = (userPos.x-7)+"px";
+    marker.style.top  = (userPos.y-7)+"px";
+    marker.style.display = "block";
   }
 
-  // 駐車ロッド描画
+  // ===== 最寄りロッド判定 =====
+  rods.forEach(r=> r.dist = null); // 初期化
   rods.forEach(r=>{
     if(userLat && r.status===0){
       r.dist = calcDistance(userLat,userLng,r.lat,r.lng);
-      if(r.dist<minDist){
+      if(r.dist < minDist){
         minDist = r.dist;
         nearest = r.id;
         nearestPos = gpsToUI(r.lat,r.lng);
       }
     }
+  });
 
+  // ===== ロッド描画 =====
+  rods.forEach(r=>{
     const d = document.createElement("div");
-    d.className = "rod "+(r.status===0?"empty":"full");
-    if(r.id===nearest) d.classList.add("nearest");
-    d.innerHTML = `${r.label}<br>${r.status===0?"空き":"使用中"}${r.dist?`<div class="distance">${r.dist.toFixed(1)}m</div>`:""}`;
-    d.style.left=((r.col-1)/3*100)+"%";
-    d.style.top=((r.row-1)*22+30)+"%";
+    d.className = "rod " + (r.status===0 ? "empty" : "full");
+    if(r.id === nearest) d.classList.add("nearest");
+    d.innerHTML = `${r.label}<br>${r.status===0?"空き":"使用中"}${r.dist ? `<div class="distance">${r.dist.toFixed(1)}m</div>` : ""}`;
+    d.style.left = ((r.col-1)/3*100) + "%";
+    d.style.top  = ((r.row-1)*22+30) + "%";
     lot.appendChild(d);
   });
 
-  // 矢印描画
+  // ===== 矢印描画 =====
   if(nearestPos && userPos){
     const targetBearing = bearing(userLat,userLng,
                                   rods.find(r=>r.id===nearest).lat,
                                   rods.find(r=>r.id===nearest).lng);
     let angleDeg = targetBearing;
-    if(deviceHeading!==null){
-      angleDeg = targetBearing - deviceHeading;
-    }
+    if(deviceHeading !== null) angleDeg -= deviceHeading;
     const dx = nearestPos.x-userPos.x;
     const dy = nearestPos.y-userPos.y;
     arrow.style.width = Math.hypot(dx,dy)+"px";
-    arrow.style.left = userPos.x+"px";
-    arrow.style.top  = userPos.y+"px";
+    arrow.style.left  = userPos.x+"px";
+    arrow.style.top   = userPos.y+"px";
     arrow.style.transform = `rotate(${angleDeg}deg)`;
     arrow.style.display = "block";
   }
 
-  // 他ユーザー描画
+  // ===== 他ユーザー描画 =====
   Object.entries(users).forEach(([id, info])=>{
     if(id === myId) return;
     const pos = gpsToUI(info.lat, info.lng);
     const other = document.createElement("div");
     other.className = "user-marker-other";
-    other.style.position = "absolute";
-    other.style.width = "12px";
-    other.style.height = "12px";
-    other.style.background = "#ff9800";
-    other.style.border = "2px solid white";
-    other.style.borderRadius = "50%";
     other.style.left = (pos.x-6)+"px";
     other.style.top  = (pos.y-6)+"px";
-    other.style.zIndex = "999";
     lot.appendChild(other);
   });
 }
 
-/* =============================
-   GPS取得
-============================= */
+// ===== GPS取得 =====
 navigator.geolocation.watchPosition(p=>{
   userLat = p.coords.latitude;
   userLng = p.coords.longitude;
   document.getElementById("location").textContent =
     `現在地：${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
-
-  // サーバに自分の位置送信
-  socket.emit("update", {id: myId, lat: userLat, lng: userLng});
-
+  sendMyPosition();
   render();
-}, ()=>document.getElementById("location").textContent="位置情報取得不可", {enableHighAccuracy:true});
+}, ()=>document.getElementById("location").textContent="位置情報取得不可",
+{enableHighAccuracy:true});
 
-/* =============================
-   方位センサ要求
-============================= */
+// ===== 方位センサ =====
 document.getElementById("enable-orientation").addEventListener("click", ()=>{
   if(typeof DeviceOrientationEvent !== "undefined" &&
      typeof DeviceOrientationEvent.requestPermission === "function"){
     DeviceOrientationEvent.requestPermission().then(state=>{
       if(state==="granted"){
         window.addEventListener("deviceorientation", handleOrientation, true);
-        alert("方位センサが有効になりました。矢印が現実の方向を向きます。");
-      } else { alert("方位センサの許可が必要です。"); }
+        alert("方位センサが有効になりました。");
+      } else { alert("方位センサの許可が必要です"); }
     });
   } else {
     window.addEventListener("deviceorientationabsolute", handleOrientation, true);
     window.addEventListener("deviceorientation", handleOrientation, true);
-    alert("方位センサを有効化しました。矢印が現実の方向を向きます。");
+    alert("方位センサを有効化しました。");
   }
 });
 
 function handleOrientation(e){
-  if(e.webkitCompassHeading !== undefined){ deviceHeading = e.webkitCompassHeading; }
-  else if(e.absolute && e.alpha !== null){ deviceHeading = e.alpha; }
-  else if(e.alpha !== null){ deviceHeading = e.alpha; }
+  if(e.webkitCompassHeading !== undefined) deviceHeading = e.webkitCompassHeading;
+  else if(e.absolute && e.alpha !== null) deviceHeading = e.alpha;
+  else if(e.alpha !== null) deviceHeading = e.alpha;
   render();
 }
 </script>
