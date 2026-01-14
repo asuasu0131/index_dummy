@@ -6,7 +6,6 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 
 <style>
-/* ===== デザインは完全にそのまま ===== */
 body {
   font-family: sans-serif;
   background: #cfcfcf;
@@ -28,6 +27,7 @@ h1 {
   font-size: clamp(12px, 3vw, 14px);
 }
 
+/* ===== 駐車場エリア（レスポンシブ） ===== */
 #parking-lot {
   position: relative;
   width: 100%;
@@ -39,6 +39,7 @@ h1 {
   border-radius: 10px;
 }
 
+/* ===== 駐車ロッド ===== */
 .rod {
   position: absolute;
   width: 33.33%;
@@ -63,6 +64,7 @@ h1 {
   box-shadow: 0 0 14px rgba(255,255,0,0.9);
 }
 
+/* ===== 自分の位置 ===== */
 #user-marker {
   position: absolute;
   width: 14px;
@@ -74,6 +76,7 @@ h1 {
   display: none;
 }
 
+/* ===== 矢印 ===== */
 #arrow {
   position: absolute;
   height: 2px;
@@ -85,6 +88,13 @@ h1 {
 
 .distance {
   font-size: clamp(10px, 2.5vw, 14px);
+  font-weight: normal;
+}
+
+/* ===== スマホ最適化 ===== */
+@media (max-width: 600px) {
+  body { padding: 4px; }
+  .rod { border-width: 2px; }
 }
 </style>
 </head>
@@ -92,8 +102,8 @@ h1 {
 <body>
 
 <h1>駐車場 空き状況ナビ</h1>
-<div id="location">慣性センサで位置推定中...</div>
-<button id="enable-orientation">センサを有効化</button>
+<div id="location">位置情報を取得中...</div>
+<button id="enable-orientation">方位センサを有効化</button>
 
 <div id="parking-lot">
   <div id="user-marker"></div>
@@ -102,133 +112,171 @@ h1 {
 
 <script>
 /* =============================
-   駐車ロッド（位置はUI座標）
+   駐車場 GPS 範囲
+============================= */
+const MIN_LAT = 38.167755;
+const MAX_LAT = 38.167785;
+const MIN_LNG = 140.866325;
+const MAX_LNG = 140.866355;
+
+/* =============================
+   ダミー駐車ロッド
 ============================= */
 const rods = [
-  { id:"A1", label:"A1", x:0.17, y:0.35, status:0, row:1, col:1 },
-  { id:"A2", label:"A2", x:0.17, y:0.55, status:1, row:2, col:1 },
-  { id:"A3", label:"A3", x:0.17, y:0.75, status:0, row:3, col:1 },
-  { id:"B1", label:"B1", x:0.83, y:0.35, status:0, row:1, col:3 },
-  { id:"B2", label:"B2", x:0.83, y:0.55, status:1, row:2, col:3 },
-  { id:"B3", label:"B3", x:0.83, y:0.75, status:0, row:3, col:3 }
+  { id:"A1", label:"A1", lat:38.167760, lng:140.866330, status:0, row:1, col:1 },
+  { id:"A2", label:"A2", lat:38.167764, lng:140.866334, status:1, row:2, col:1 },
+  { id:"A3", label:"A3", lat:38.167770, lng:140.866338, status:0, row:3, col:1 },
+  { id:"B1", label:"B1", lat:38.167774, lng:140.866342, status:0, row:1, col:3 },
+  { id:"B2", label:"B2", lat:38.167778, lng:140.866346, status:1, row:2, col:3 },
+  { id:"B3", label:"B3", lat:38.167782, lng:140.866350, status:0, row:3, col:3 }
 ];
 
-/* =============================
-   ユーザ位置（PDR）
-============================= */
-let userX = 0.5;
-let userY = 0.8;
-let deviceHeading = 0;
-let lastStepTime = 0;
+let userLat=null, userLng=null;
+let deviceHeading=null; // 北基準角度
 
 /* =============================
-   歩行検出（簡易）
+   GPS距離計算
 ============================= */
-window.addEventListener("devicemotion", e => {
-  const acc = e.accelerationIncludingGravity;
-  if (!acc) return;
-
-  const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-
-  if (mag > 13) { // 歩行っぽい閾値
-    const now = Date.now();
-    if (now - lastStepTime > 400) {
-      moveForward();
-      lastStepTime = now;
-    }
-  }
-});
+function calcDistance(lat1,lng1,lat2,lng2){
+  const R=6371e3;
+  const φ1=lat1*Math.PI/180;
+  const φ2=lat2*Math.PI/180;
+  const dφ=(lat2-lat1)*Math.PI/180;
+  const dλ=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
 
 /* =============================
-   前進処理（向いている方向）
+   GPS → UI座標
 ============================= */
-function moveForward() {
-  const step = 0.015;
-  const rad = deviceHeading * Math.PI / 180;
-  userX += step * Math.sin(rad);
-  userY -= step * Math.cos(rad);
+function gpsToUI(lat,lng){
+  const lot=document.getElementById("parking-lot");
+  return {
+    x:(lng-MIN_LNG)/(MAX_LNG-MIN_LNG)*lot.clientWidth,
+    y:(MAX_LAT-lat)/(MAX_LAT-MIN_LAT)*lot.clientHeight
+  };
+}
 
-  userX = Math.max(0, Math.min(1, userX));
-  userY = Math.max(0, Math.min(1, userY));
-
-  render();
+/* =============================
+   2地点の方位角計算（北=0°）
+============================= */
+function bearing(lat1,lng1,lat2,lng2){
+  const φ1=lat1*Math.PI/180;
+  const φ2=lat2*Math.PI/180;
+  const λ1=lng1*Math.PI/180;
+  const λ2=lng2*Math.PI/180;
+  const y=Math.sin(λ2-λ1)*Math.cos(φ2);
+  const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(λ2-λ1);
+  return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
 
 /* =============================
    描画
 ============================= */
 function render(){
-  const lot = document.getElementById("parking-lot");
-  const marker = document.getElementById("user-marker");
-  const arrow = document.getElementById("arrow");
+  const lot=document.getElementById("parking-lot");
+  const marker=document.getElementById("user-marker");
+  const arrow=document.getElementById("arrow");
 
   document.querySelectorAll(".rod").forEach(e=>e.remove());
 
-  const ux = userX * lot.clientWidth;
-  const uy = userY * lot.clientHeight;
+  let nearest=null, minDist=Infinity, nearestPos=null, userPos=null;
 
-  marker.style.left = (ux - 7) + "px";
-  marker.style.top  = (uy - 7) + "px";
-  marker.style.display = "block";
-
-  let nearest=null, minDist=Infinity, tx, ty;
-
-  rods.forEach(r=>{
-    const rx = r.x * lot.clientWidth;
-    const ry = r.y * lot.clientHeight;
-    const d = Math.hypot(rx-ux, ry-uy);
-
-    if (r.status===0 && d < minDist) {
-      minDist = d;
-      nearest = r;
-      tx = rx;
-      ty = ry;
-    }
-
-    const div=document.createElement("div");
-    div.className="rod "+(r.status===0?"empty":"full");
-    if(nearest===r) div.classList.add("nearest");
-    div.innerHTML=`${r.label}<br>${r.status===0?"空き":"使用中"}`;
-    div.style.left=((r.col-1)/3*100)+"%";
-    div.style.top=((r.row-1)*22+30)+"%";
-    lot.appendChild(div);
-  });
-
-  if(nearest){
-    const dx=tx-ux, dy=ty-uy;
-    arrow.style.width=Math.hypot(dx,dy)+"px";
-    arrow.style.left=ux+"px";
-    arrow.style.top=uy+"px";
-    arrow.style.transform=`rotate(${Math.atan2(dx,-dy)*180/Math.PI}deg)`;
-    arrow.style.display="block";
+  if(userLat){
+    userPos=gpsToUI(userLat,userLng);
+    marker.style.left=(userPos.x-7)+"px";
+    marker.style.top=(userPos.y-7)+"px";
+    marker.style.display="block";
   }
 
-  document.getElementById("location").textContent =
-    `推定位置 X:${userX.toFixed(2)} Y:${userY.toFixed(2)}`;
+  rods.forEach(r=>{
+    if(userLat && r.status===0){
+      r.dist=calcDistance(userLat,userLng,r.lat,r.lng);
+      if(r.dist<minDist){
+        minDist=r.dist;
+        nearest=r.id;
+        nearestPos=gpsToUI(r.lat,r.lng);
+      }
+    }
+
+    const d=document.createElement("div");
+    d.className="rod "+(r.status===0?"empty":"full");
+    if(r.id===nearest) d.classList.add("nearest");
+
+    d.innerHTML=`${r.label}<br>${r.status===0?"空き":"使用中"}${r.dist?`<div class="distance">${r.dist.toFixed(1)}m</div>`:""}`;
+    d.style.left=((r.col-1)/3*100)+"%";
+    d.style.top=((r.row-1)*22+30)+"%";
+    lot.appendChild(d);
+  });
+
+  /* 矢印描画（北基準対応） */
+  if(nearestPos && userPos){
+    const targetBearing = bearing(userLat,userLng,
+                                  rods.find(r=>r.id===nearest).lat,
+                                  rods.find(r=>r.id===nearest).lng);
+    let angleDeg = targetBearing;
+    if(deviceHeading!==null){
+      angleDeg = targetBearing - deviceHeading;
+    }
+    const dx=nearestPos.x-userPos.x;
+    const dy=nearestPos.y-userPos.y;
+    arrow.style.width=Math.hypot(dx,dy)+"px";
+    arrow.style.left=userPos.x+"px";
+    arrow.style.top=userPos.y+"px";
+    arrow.style.transform=`rotate(${angleDeg}deg)`;
+    arrow.style.display="block";
+  }
 }
 
 /* =============================
-   方位センサ
+   GPS取得
+============================= */
+navigator.geolocation.watchPosition(
+  p=>{
+    userLat=p.coords.latitude;
+    userLng=p.coords.longitude;
+    document.getElementById("location").textContent=
+      `現在地：${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
+    render();
+  },
+  ()=>document.getElementById("location").textContent="位置情報取得不可",
+  {enableHighAccuracy:true}
+);
+
+/* =============================
+   方位センサ要求（押さないと進まない）
 ============================= */
 document.getElementById("enable-orientation").addEventListener("click", ()=>{
-  if (DeviceOrientationEvent.requestPermission) {
-    DeviceOrientationEvent.requestPermission().then(p=>{
-      if(p==="granted"){
-        window.addEventListener("deviceorientation", e=>{
-          deviceHeading = e.webkitCompassHeading ?? e.alpha ?? 0;
-        });
-        alert("慣性センサを有効化しました");
+  if(typeof DeviceOrientationEvent !== "undefined" &&
+     typeof DeviceOrientationEvent.requestPermission === "function"){
+    DeviceOrientationEvent.requestPermission().then(state=>{
+      if(state==="granted"){
+        window.addEventListener("deviceorientation", handleOrientation, true);
+        alert("方位センサが有効になりました。矢印が現実の方向を向きます。");
+      } else {
+        alert("方位センサの許可が必要です。");
       }
     });
   } else {
-    window.addEventListener("deviceorientation", e=>{
-      deviceHeading = e.alpha ?? 0;
-    });
-    alert("慣性センサを有効化しました");
+    // iOS以外または古いブラウザ
+    window.addEventListener("deviceorientationabsolute", handleOrientation, true);
+    window.addEventListener("deviceorientation", handleOrientation, true);
+    alert("方位センサを有効化しました。矢印が現実の方向を向きます。");
   }
 });
 
-render();
+function handleOrientation(e){
+  if(e.webkitCompassHeading !== undefined){
+    // iOS Safari
+    deviceHeading = e.webkitCompassHeading;
+  } else if(e.absolute && e.alpha !== null){
+    deviceHeading = e.alpha; // 真北基準
+  } else if(e.alpha !== null){
+    deviceHeading = e.alpha; // 相対角 fallback
+  }
+  render();
+}
 </script>
 
 </body>
