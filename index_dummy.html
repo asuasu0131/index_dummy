@@ -4,20 +4,18 @@
 <meta charset="utf-8">
 <title>駐車場 空き状況ナビ（矢印付き）</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-
 <style>
-body { font-family: sans-serif; background: #cfcfcf; padding: 8px; margin: 0; text-align: center; }
-h1 { font-size: clamp(18px, 4vw, 26px); margin: 6px 0; }
-#location { background: #fff; padding: 8px; margin-bottom: 8px; border-radius: 6px; font-size: clamp(12px, 3vw, 14px);}
-#parking-lot { position: relative; width: 100%; max-width: 900px; aspect-ratio: 9 / 6.5; margin: auto; background: #bfbfbf; overflow: hidden; border-radius: 10px; }
-.rod { position: absolute; width: 33.33%; height: 22%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: clamp(14px, 3.5vw, 24px); border-top: 3px solid white; border-bottom: 3px solid white; box-sizing: border-box; }
-.empty { background: #4caf50; } .full  { background: #f44336; }
-.nearest { outline: 4px solid yellow; box-shadow: 0 0 14px rgba(255,255,0,0.9); }
-#user-marker { position: absolute; width: 14px; height: 14px; background: #2196f3; border-radius: 50%; border: 2px solid white; z-index: 1000; display: none; }
-.user-marker-other { position: absolute; width: 12px; height: 12px; background: #ff9800; border: 2px solid white; border-radius: 50%; z-index: 999; }
-#arrow { position: absolute; height: 2px; background: red; transform-origin: left center; z-index: 900; display: none; }
-.distance { font-size: clamp(10px, 2.5vw, 14px); font-weight: normal; }
-@media (max-width: 600px) { body { padding: 4px; } .rod { border-width: 2px; } }
+body { font-family:sans-serif;background:#cfcfcf;padding:8px;margin:0;text-align:center;}
+h1{font-size:clamp(18px,4vw,26px);margin:6px 0;}
+#location{background:#fff;padding:8px;margin-bottom:8px;border-radius:6px;font-size:clamp(12px,3vw,14px);}
+#parking-lot{position:relative;width:100%;max-width:900px;aspect-ratio:9/6.5;margin:auto;background:#bfbfbf;overflow:hidden;border-radius:10px;}
+.rod{position:absolute;width:33.33%;height:22%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:clamp(14px,3.5vw,24px);border-top:3px solid white;border-bottom:3px solid white;box-sizing:border-box;}
+.empty{background:#4caf50;} .full{background:#f44336;}
+.nearest{outline:4px solid yellow;box-shadow:0 0 14px rgba(255,255,0,0.9);}
+.distance{font-size:clamp(10px,2.5vw,14px);font-weight:normal;}
+#user-marker{position:absolute;width:14px;height:14px;background:#2196f3;border-radius:50%;border:2px solid white;z-index:1000;display:none;}
+.user-marker-other{position:absolute;width:12px;height:12px;background:#ff9800;border:2px solid white;border-radius:50%;z-index:999;}
+#arrow{position:absolute;height:2px;background:red;transform-origin:left center;z-index:900;display:none;}
 </style>
 </head>
 <body>
@@ -25,6 +23,7 @@ h1 { font-size: clamp(18px, 4vw, 26px); margin: 6px 0; }
 <h1>駐車場 空き状況ナビ</h1>
 <div id="location">位置情報を取得中...</div>
 <button id="enable-orientation">方位センサを有効化</button>
+
 <div id="parking-lot">
   <div id="user-marker"></div>
   <div id="arrow"></div>
@@ -32,146 +31,107 @@ h1 { font-size: clamp(18px, 4vw, 26px); margin: 6px 0; }
 
 <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
 <script>
-const MIN_LAT = 38.16742, MAX_LAT = 38.16752, MIN_LNG = 140.86591, MAX_LNG = 140.86561;
+const MIN_LAT=38.16742,MAX_LAT=38.16752,MIN_LNG=140.86591,MAX_LNG=140.86561;
 
-let rods = [
-  { id:"A1", label:"A1", lat:38.16748, lng:140.86561, status:0, row:1, col:1 },
-  { id:"A2", label:"A2", lat:38.16746, lng:140.86561, status:1, row:2, col:1 },
-  { id:"A3", label:"A3", lat:38.16744, lng:140.86561, status:0, row:3, col:1 },
-  { id:"B1", label:"B1", lat:38.16748, lng:140.86591, status:0, row:1, col:3 },
-  { id:"B2", label:"B2", lat:38.16746, lng:140.86591, status:1, row:2, col:3 },
-  { id:"B3", label:"B3", lat:38.16744, lng:140.86591, status:0, row:3, col:3 }
+const rods=[
+ {id:"A1",lat:38.16748,lng:140.86561,status:0,row:1,col:1},
+ {id:"A2",lat:38.16746,lng:140.86561,status:1,row:2,col:1},
+ {id:"A3",lat:38.16744,lng:140.86561,status:0,row:3,col:1},
+ {id:"B1",lat:38.16748,lng:140.86591,status:0,row:1,col:3},
+ {id:"B2",lat:38.16746,lng:140.86591,status:1,row:2,col:3},
+ {id:"B3",lat:38.16744,lng:140.86635,status:0,row:3,col:3}
 ];
 
-let userLat=null, userLng=null, deviceHeading=null;
-const myId = crypto.randomUUID();
-let users = {};
-let displayedPos = null; // 表示用座標
+let userLat=null,userLng=null,deviceHeading=null;
+let displayedPos=null;
+const myId=crypto.randomUUID();
+let users={};
 
-// GPS → UI
+const lot=document.getElementById("parking-lot");
+const arrow=document.getElementById("arrow");
+
 function gpsToUI(lat,lng){
-  const lot = document.getElementById("parking-lot");
-  return { x:(lng-MIN_LNG)/(MAX_LNG-MIN_LNG)*lot.clientWidth,
-           y:(MAX_LAT-lat)/(MAX_LAT-MIN_LAT)*lot.clientHeight };
+ return{
+  x:(lng-MIN_LNG)/(MAX_LNG-MIN_LNG)*lot.clientWidth,
+  y:(MAX_LAT-lat)/(MAX_LAT-MIN_LAT)*lot.clientHeight
+ };
 }
 
-// 距離計算
-function calcDistance(lat1,lng1,lat2,lng2){
-  const R=6371e3, φ1=lat1*Math.PI/180, φ2=lat2*Math.PI/180;
-  const dφ=(lat2-lat1)*Math.PI/180, dλ=(lng2-lng1)*Math.PI/180;
-  const a=Math.sin(dφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2;
-  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+function calcDistance(a,b,c,d){
+ const R=6371e3;
+ const φ1=a*Math.PI/180,φ2=c*Math.PI/180;
+ const dφ=(c-a)*Math.PI/180,dλ=(d-b)*Math.PI/180;
+ const x=Math.sin(dφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2;
+ return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
 }
 
-// 方位角
-function bearing(lat1,lng1,lat2,lng2){
-  const φ1=lat1*Math.PI/180, φ2=lat2*Math.PI/180;
-  const λ1=lng1*Math.PI/180, λ2=lng2*Math.PI/180;
-  const y=Math.sin(λ2-λ1)*Math.cos(φ2);
-  const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(λ2-λ1);
-  return (Math.atan2(y,x)*180/Math.PI+360)%360;
+function bearing(a,b,c,d){
+ const φ1=a*Math.PI/180,φ2=c*Math.PI/180;
+ const λ1=b*Math.PI/180,λ2=d*Math.PI/180;
+ const y=Math.sin(λ2-λ1)*Math.cos(φ2);
+ const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(λ2-λ1);
+ return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
 
-// Socket.IO
-const socket = io("https://parking-monitor-fr8a.onrender.com");
-socket.on("rods_status", data=>{ rods.forEach(r=>{ if(data[r.id]!==undefined) r.status=data[r.id]; }); render(); });
-socket.on("users", data=>{ users=data; render(); });
-function sendMyPosition(){ if(userLat!==null && userLng!==null) socket.emit("update",{id:myId,lat:userLat,lng:userLng}); }
-
-// ===== 滑らか描画 =====
-function updateUserMarker(){
-  const marker = document.getElementById("user-marker");
-  if(userLat===null||userLng===null){ requestAnimationFrame(updateUserMarker); return; }
-  const target = gpsToUI(userLat,userLng);
-  if(!displayedPos) displayedPos = { x: target.x, y: target.y };
-  displayedPos.x += (target.x - displayedPos.x)*0.2;
-  displayedPos.y += (target.y - displayedPos.y)*0.2;
-  marker.style.left = (displayedPos.x-7)+"px";
-  marker.style.top  = (displayedPos.y-7)+"px";
-  marker.style.display="block";
-  render();
-  requestAnimationFrame(updateUserMarker);
-}
-updateUserMarker();
-
-// 描画
 function render(){
-  const lot = document.getElementById("parking-lot");
-  const arrow = document.getElementById("arrow");
-  document.querySelectorAll(".rod,.user-marker-other").forEach(e=>e.remove());
+ document.querySelectorAll(".rod,.user-marker-other").forEach(e=>e.remove());
+ if(userLat===null||userLng===null||!displayedPos) return;
 
-  let nearest=null, minDist=Infinity, nearestPos=null;
-  let userPos = displayedPos;
+ let nearest=null,minDist=Infinity;
 
-  rods.forEach(r=>{ r.dist=null; });
-  rods.forEach(r=>{
-    if(userPos && r.status===0){
-      r.dist = calcDistance(userLat,userLng,r.lat,r.lng);
-      if(r.dist<minDist){ minDist=r.dist; nearest=r.id; nearestPos=gpsToUI(r.lat,r.lng); }
-    }
-  });
+ rods.forEach(r=>{
+  if(r.status===0){
+   r.dist=calcDistance(userLat,userLng,r.lat,r.lng);
+   if(!isNaN(r.dist)&&r.dist<minDist){minDist=r.dist;nearest=r;}
+  }else r.dist=null;
+ });
 
-  rods.forEach(r=>{
-    const d=document.createElement("div");
-    d.className="rod "+(r.status===0?"empty":"full");
-    if(r.id===nearest) d.classList.add("nearest");
-    d.innerHTML=`${r.label}<br>${r.status===0?"空き":"使用中"}${r.dist?`<div class="distance">${r.dist.toFixed(1)}m</div>`:""}`;
-    d.style.left = ((r.col-1)/3*100)+"%";
-    d.style.top  = ((r.row-1)*22+30)+"%";
-    lot.appendChild(d);
-  });
+ rods.forEach(r=>{
+  const d=document.createElement("div");
+  d.className="rod "+(r.status===0?"empty":"full");
+  if(nearest&&nearest.id===r.id)d.classList.add("nearest");
+  d.innerHTML=`${r.id}<br>${r.status===0?"空き":"使用中"}${
+   r.dist!==null&&!isNaN(r.dist)?`<div class="distance">${r.dist.toFixed(1)}m</div>`:""
+  }`;
+  d.style.left=((r.col-1)/3*100)+"%";
+  d.style.top=((r.row-1)*22+30)+"%";
+  lot.appendChild(d);
+ });
 
-  if(nearestPos && userPos){
-    const targetBearing = bearing(userLat,userLng, rods.find(r=>r.id===nearest).lat, rods.find(r=>r.id===nearest).lng);
-    let angleDeg = targetBearing;
-    if(deviceHeading!==null) angleDeg -= deviceHeading;
-    const dx = nearestPos.x-userPos.x;
-    const dy = nearestPos.y-userPos.y;
-    arrow.style.width = Math.hypot(dx,dy)+"px";
-    arrow.style.left = userPos.x+"px";
-    arrow.style.top  = userPos.y+"px";
-    arrow.style.transform = `rotate(${angleDeg}deg)`;
-    arrow.style.display="block";
-  }
-
-  Object.entries(users).forEach(([id,info])=>{
-    if(id===myId) return;
-    const pos = gpsToUI(info.lat,info.lng);
-    const other = document.createElement("div");
-    other.className="user-marker-other";
-    other.style.left=(pos.x-6)+"px";
-    other.style.top=(pos.y-6)+"px";
-    lot.appendChild(other);
-  });
+ if(nearest){
+  const t=gpsToUI(nearest.lat,nearest.lng);
+  const dx=t.x-displayedPos.x,dy=t.y-displayedPos.y;
+  let ang=bearing(userLat,userLng,nearest.lat,nearest.lng);
+  if(deviceHeading!==null) ang-=deviceHeading;
+  arrow.style.width=Math.hypot(dx,dy)+"px";
+  arrow.style.left=displayedPos.x+"px";
+  arrow.style.top=displayedPos.y+"px";
+  arrow.style.transform=`rotate(${ang+90}deg)`;
+  arrow.style.display="block";
+ }
 }
 
-// GPS
 navigator.geolocation.watchPosition(p=>{
-  userLat = p.coords.latitude; userLng = p.coords.longitude;
-  document.getElementById("location").textContent=`現在地：${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
-  sendMyPosition();
+ userLat=p.coords.latitude;
+ userLng=p.coords.longitude;
+ document.getElementById("location").textContent=
+  `現在地：${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
 },{enableHighAccuracy:true});
 
-// 方位センサ
-document.getElementById("enable-orientation").addEventListener("click",()=>{
-  if(typeof DeviceOrientationEvent!=="undefined" && typeof DeviceOrientationEvent.requestPermission==="function"){
-    DeviceOrientationEvent.requestPermission().then(state=>{
-      if(state==="granted"){ window.addEventListener("deviceorientation", handleOrientation, true); alert("方位センサが有効になりました"); }
-      else alert("許可が必要です");
-    });
-  } else {
-    window.addEventListener("deviceorientationabsolute", handleOrientation,true);
-    window.addEventListener("deviceorientation", handleOrientation,true);
-    alert("方位センサを有効化しました");
-  }
-});
-
-function handleOrientation(e){
-  if(e.webkitCompassHeading!==undefined) deviceHeading=e.webkitCompassHeading;
-  else if(e.absolute && e.alpha!==null) deviceHeading=e.alpha;
-  else if(e.alpha!==null) deviceHeading=e.alpha;
+(function smooth(){
+ if(userLat!==null){
+  const t=gpsToUI(userLat,userLng);
+  if(!displayedPos)displayedPos={x:t.x,y:t.y};
+  displayedPos.x+=(t.x-displayedPos.x)*0.2;
+  displayedPos.y+=(t.y-displayedPos.y)*0.2;
+  const m=document.getElementById("user-marker");
+  m.style.left=(displayedPos.x-7)+"px";
+  m.style.top=(displayedPos.y-7)+"px";
+  m.style.display="block";
   render();
-}
+ }
+ requestAnimationFrame(smooth);
+})();
 </script>
 </body>
 </html>
