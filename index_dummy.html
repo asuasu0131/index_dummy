@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>駐車場 空き状況ナビ（距離表示対応）</title>
+<title>駐車場 空き状況ナビ（滑らかGPS対応）</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 
 <style>
@@ -116,6 +116,7 @@ h1 {
 </div>
 
 <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+
 <script>
 const MIN_LAT = 38.16742;
 const MAX_LAT = 38.16752;
@@ -135,7 +136,7 @@ let userLat = null, userLng = null;
 let deviceHeading = null;
 const myId = crypto.randomUUID();
 let users = {};
-let displayedPos = null;
+let displayedPos = null; // GPS滑らか表示用
 
 // ===== GPS → UI 座標変換 =====
 function gpsToUI(lat,lng){
@@ -168,7 +169,7 @@ function bearing(lat1,lng1,lat2,lng2){
   return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
 
-// ===== Socket.IO =====
+// ===== Socket.IO 接続 =====
 const socket = io("https://parking-monitor-fr8a.onrender.com");
 
 socket.on("rods_status", data=>{
@@ -189,14 +190,87 @@ function sendMyPosition(){
   }
 }
 
-// ===== GPS滑らか表示 =====
+// ===== 描画 =====
+function render(){
+  const lot = document.getElementById("parking-lot");
+  const arrow = document.getElementById("arrow");
+
+  document.querySelectorAll(".rod, .user-marker-other").forEach(e=>e.remove());
+
+  // ===== ロッド描画（GPSに依存せず常に表示） =====
+  rods.forEach(r=>{
+    const d = document.createElement("div");
+    d.className = "rod " + (r.status===0 ? "empty" : "full");
+    d.innerHTML = `${r.label}<br>${r.status===0?"空き":"使用中"}`;
+    d.style.left = ((r.col-1)/3*100) + "%";
+    d.style.top  = ((r.row-1)*22+30) + "%";
+    lot.appendChild(d);
+  });
+
+  if(!displayedPos) return; // GPS未取得なら矢印や距離は描画しない
+
+  let nearest=null;
+  let minDist=Infinity;
+  let nearestPos=null;
+  let userPos = displayedPos;
+
+  // ===== 最寄りロッド判定 =====
+  rods.forEach(r=>{
+    if(r.status===0){
+      r.dist = calcDistance(userLat,userLng,r.lat,r.lng);
+      if(r.dist < minDist){
+        minDist = r.dist;
+        nearest = r.id;
+        nearestPos = gpsToUI(r.lat,r.lng);
+      }
+    }
+  });
+
+  // ===== 最寄りロッド装飾 =====
+  if(nearestPos){
+    const nearestDiv = Array.from(document.querySelectorAll(".rod"))
+                            .find(d => d.innerHTML.includes(nearest));
+    if(nearestDiv) nearestDiv.classList.add("nearest");
+    if(nearestDiv) nearestDiv.innerHTML += `<div class="distance">${minDist.toFixed(1)}m</div>`;
+  }
+
+  // ===== 矢印描画 =====
+  if(nearestPos){
+    const targetBearing = bearing(userLat,userLng,
+                                  rods.find(r=>r.id===nearest).lat,
+                                  rods.find(r=>r.id===nearest).lng);
+    let angleDeg = targetBearing;
+    if(deviceHeading !== null) angleDeg -= deviceHeading;
+    const dx = nearestPos.x-userPos.x;
+    const dy = nearestPos.y-userPos.y;
+    arrow.style.width = Math.hypot(dx,dy)+"px";
+    arrow.style.left  = userPos.x+"px";
+    arrow.style.top   = userPos.y+"px";
+    arrow.style.transform = `rotate(${angleDeg}deg)`;
+    arrow.style.display = "block";
+  }
+
+  // ===== 他ユーザー描画 =====
+  Object.entries(users).forEach(([id, info])=>{
+    if(id === myId) return;
+    const pos = gpsToUI(info.lat, info.lng);
+    const other = document.createElement("div");
+    other.className = "user-marker-other";
+    other.style.left = (pos.x-6)+"px";
+    other.style.top  = (pos.y-6)+"px";
+    lot.appendChild(other);
+  });
+}
+
+// ===== GPS取得 & 滑らか表示 =====
 navigator.geolocation.watchPosition(p=>{
   userLat = p.coords.latitude;
   userLng = p.coords.longitude;
   document.getElementById("location").textContent =
     `現在地：${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
   sendMyPosition();
-},{enableHighAccuracy:true, maximumAge:100, timeout:5000});
+}, ()=>document.getElementById("location").textContent="位置情報取得不可",
+{enableHighAccuracy:true, maximumAge:100, timeout:5000});
 
 function updateUserMarker(){
   const marker = document.getElementById("user-marker");
@@ -212,75 +286,10 @@ function updateUserMarker(){
   marker.style.top  = (displayedPos.y - 7) + "px";
   marker.style.display = "block";
 
-  render();
+  render(); // 滑らか更新に合わせて描画
   requestAnimationFrame(updateUserMarker);
 }
 updateUserMarker();
-
-// ===== 描画 =====
-function render(){
-  const lot = document.getElementById("parking-lot");
-  const arrow = document.getElementById("arrow");
-
-  document.querySelectorAll(".rod, .user-marker-other").forEach(e=>e.remove());
-
-  // 最寄りロッドを計算
-  let nearest=null, minDist=Infinity, nearestPos=null;
-  rods.forEach(r=>{
-    if(displayedPos && r.status===0){
-      r.dist = calcDistance(userLat,userLng,r.lat,r.lng);
-      if(r.dist < minDist){
-        minDist = r.dist;
-        nearest = r.id;
-        nearestPos = gpsToUI(r.lat,r.lng);
-      }
-    } else r.dist = null;
-  });
-
-  // ロッド描画（距離もここで追加）
-  rods.forEach(r=>{
-    const d = document.createElement("div");
-    d.className = "rod " + (r.status===0 ? "empty" : "full");
-    if(r.id === nearest) d.classList.add("nearest");
-
-    let html = `${r.label}<br>${r.status===0?"空き":"使用中"}`;
-    if(r.dist) html += `<div class="distance">${r.dist.toFixed(1)}m</div>`;
-    d.innerHTML = html;
-
-    d.style.left = ((r.col-1)/3*100) + "%";
-    d.style.top  = ((r.row-1)*22+30) + "%";
-    lot.appendChild(d);
-  });
-
-  if(!displayedPos) return;
-
-  // 矢印描画
-  if(nearestPos){
-    const targetBearing = bearing(userLat,userLng,
-                                  rods.find(r=>r.id===nearest).lat,
-                                  rods.find(r=>r.id===nearest).lng);
-    let angleDeg = targetBearing;
-    if(deviceHeading !== null) angleDeg -= deviceHeading;
-    const dx = nearestPos.x-displayedPos.x;
-    const dy = nearestPos.y-displayedPos.y;
-    arrow.style.width = Math.hypot(dx,dy)+"px";
-    arrow.style.left  = displayedPos.x+"px";
-    arrow.style.top   = displayedPos.y+"px";
-    arrow.style.transform = `rotate(${angleDeg}deg)`;
-    arrow.style.display = "block";
-  }
-
-  // 他ユーザー描画
-  Object.entries(users).forEach(([id, info])=>{
-    if(id === myId) return;
-    const pos = gpsToUI(info.lat, info.lng);
-    const other = document.createElement("div");
-    other.className = "user-marker-other";
-    other.style.left = (pos.x-6)+"px";
-    other.style.top  = (pos.y-6)+"px";
-    lot.appendChild(other);
-  });
-}
 
 // ===== 方位センサ =====
 document.getElementById("enable-orientation").addEventListener("click", ()=>{
